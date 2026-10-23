@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+import '../models/app_usage_state.dart';
+import '../services/app_monitor_service.dart';
 import '../viewmodels/home_viewmodel.dart';
+import 'widgets/stop_confirmation_dialog.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -25,8 +29,8 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Re-verificar permisos cuando la app vuelve a primer plano
-      context.read<HomeViewModel>().checkPermissions();
+      // Re-verificar permisos y estado cuando la app vuelve a primer plano
+      context.read<HomeViewModel>().refresh();
     }
   }
 
@@ -43,73 +47,264 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.shield, size: 80, color: Colors.deepPurple),
-              const SizedBox(height: 24),
-              Text(
-                'Protege tu tiempo',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 40),
-              
-              _buildPermissionCard(
-                context,
-                title: 'Acceso a Uso de Aplicaciones',
-                isGranted: viewModel.hasUsagePermission,
-                onTap: viewModel.requestUsagePermission,
-              ),
-              const SizedBox(height: 16),
-              _buildPermissionCard(
-                context,
-                title: 'Mostrar sobre otras Apps',
-                isGranted: viewModel.hasOverlayPermission,
-                onTap: viewModel.requestOverlayPermission,
-              ),
-              
-              const SizedBox(height: 40),
-              if (viewModel.isReady)
-                ElevatedButton.icon(
-                  icon: Icon(viewModel.isServiceRunning ? Icons.check : Icons.play_arrow),
-                  label: Text(viewModel.isServiceRunning ? 'Servicio Activo' : 'Iniciar Protección'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    backgroundColor: viewModel.isServiceRunning ? Colors.green : Colors.deepPurple,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: viewModel.isServiceRunning ? null : viewModel.startService,
-                ),
-                
-              if (viewModel.isServiceRunning) ...[
-                const SizedBox(height: 24),
-                const Text(
-                  'El servicio se está ejecutando en segundo plano.\nInstagram y TikTok están siendo monitoreados:\n5 min uso -> 10 min descanso -> Max 1 hora diaria.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ]
-            ],
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: viewModel.isAndroid ? _buildContent(context, viewModel) : _buildUnsupported(context),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildPermissionCard(BuildContext context, {required String title, required bool isGranted, required VoidCallback onTap}) {
+  Widget _buildUnsupported(BuildContext context) {
+    return Text(
+      'Attemption solo funciona en Android.',
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.titleMedium,
+    );
+  }
+
+  Widget _buildContent(BuildContext context, HomeViewModel viewModel) {
+    final usage = viewModel.usage;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Icon(Icons.shield, size: 80, color: Colors.deepPurple),
+        const SizedBox(height: 16),
+        Text(
+          'Protege tu tiempo',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 24),
+        if (viewModel.isServiceRunning) ...[
+          _StatusCard(usage: usage),
+          const SizedBox(height: 24),
+        ],
+        const _SectionTitle('Permisos necesarios'),
+        _PermissionCard(
+          title: 'Acceso a Uso de Aplicaciones',
+          isGranted: viewModel.hasUsagePermission,
+          onTap: viewModel.requestUsagePermission,
+        ),
+        const SizedBox(height: 12),
+        _PermissionCard(
+          title: 'Mostrar sobre otras Apps',
+          isGranted: viewModel.hasOverlayPermission,
+          onTap: viewModel.requestOverlayPermission,
+        ),
+        const SizedBox(height: 24),
+        const _SectionTitle('Recomendados'),
+        _PermissionCard(
+          title: 'Notificaciones',
+          subtitle: 'Para ver el tiempo restante en la barra de notificaciones',
+          isGranted: viewModel.hasNotificationPermission,
+          isRequired: false,
+          onTap: viewModel.requestNotificationPermission,
+        ),
+        const SizedBox(height: 12),
+        _PermissionCard(
+          title: 'Sin restricción de batería',
+          subtitle: 'Evita que Android cierre la protección en segundo plano',
+          isGranted: viewModel.isIgnoringBatteryOptimizations,
+          isRequired: false,
+          onTap: viewModel.requestBatteryExemption,
+        ),
+        TextButton.icon(
+          icon: const Icon(Icons.open_in_new, size: 18),
+          label: Text(
+            viewModel.manufacturer.isEmpty
+                ? 'Guía para que tu teléfono no cierre la app'
+                : 'Guía para teléfonos ${viewModel.manufacturer}',
+          ),
+          onPressed: viewModel.openBatteryGuide,
+        ),
+        const SizedBox(height: 24),
+        if (viewModel.isServiceRunning)
+          OutlinedButton.icon(
+            icon: const Icon(Icons.power_settings_new),
+            label: const Text('Desactivar protección'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            ),
+            onPressed: () => _confirmStop(context, viewModel),
+          )
+        else if (viewModel.isReady)
+          ElevatedButton.icon(
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('Iniciar Protección'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: viewModel.startService,
+          ),
+      ],
+    );
+  }
+
+  Future<void> _confirmStop(BuildContext context, HomeViewModel viewModel) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final usage = viewModel.usage;
+    if (usage.isLocked) {
+      messenger.showSnackBar(SnackBar(content: Text(_lockedMessage(usage))));
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const StopConfirmationDialog(),
+    );
+    if (confirmed != true) return;
+
+    final result = await viewModel.stopService();
+    switch (result) {
+      case StopResult.stopped:
+        messenger.showSnackBar(const SnackBar(content: Text('Protección desactivada.')));
+      case StopResult.locked:
+        messenger.showSnackBar(SnackBar(content: Text(_lockedMessage(viewModel.usage))));
+      case StopResult.failed:
+        messenger.showSnackBar(const SnackBar(content: Text('No se pudo desactivar la protección.')));
+    }
+  }
+
+  String _lockedMessage(AppUsageModel usage) => usage.state == UsageState.blocked
+      ? 'Ya alcanzaste tu límite diario: la protección no se puede desactivar hasta mañana.'
+      : 'Estás en un descanso: podrás desactivar la protección en ${_minutesCeil(usage.restRemaining)} min.';
+}
+
+int _minutesCeil(Duration d) => (d.inSeconds + 59) ~/ 60;
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.grey[700])),
+    );
+  }
+}
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({required this.usage});
+
+  final AppUsageModel usage;
+
+  @override
+  Widget build(BuildContext context) {
+    final (title, color, icon) = switch (usage.state) {
+      UsageState.resting => ('Descanso: faltan ${_minutesCeil(usage.restRemaining)} min', Colors.orange, Icons.self_improvement),
+      UsageState.blocked => ('Límite diario alcanzado', Colors.red, Icons.block),
+      _ => ('Protección activa', Colors.green, Icons.check_circle),
+    };
+
     return Card(
       elevation: 0,
-      color: isGranted ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
+      color: color.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: isGranted ? Colors.green : Colors.orange),
+        side: BorderSide(color: color),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _UsageBar(label: 'Hoy', used: usage.dailyUsed, limit: usage.dailyLimit, color: color),
+            const SizedBox(height: 12),
+            _UsageBar(label: 'Sesión actual', used: usage.sessionUsed, limit: usage.sessionLimit, color: color),
+            const SizedBox(height: 12),
+            Text(
+              'Instagram y TikTok: ${usage.sessionLimit.inMinutes} min de uso, luego ${usage.restLimit.inMinutes} min '
+              'de descanso. Máximo ${usage.dailyLimit.inMinutes} min al día.',
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UsageBar extends StatelessWidget {
+  const _UsageBar({required this.label, required this.used, required this.limit, required this.color});
+
+  final String label;
+  final Duration used;
+  final Duration limit;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = limit.inMilliseconds == 0 ? 0.0 : (used.inMilliseconds / limit.inMilliseconds).clamp(0.0, 1.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$label: ${used.inMinutes} de ${limit.inMinutes} min'),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: progress,
+          minHeight: 8,
+          borderRadius: BorderRadius.circular(4),
+          color: color,
+          backgroundColor: color.withValues(alpha: 0.15),
+        ),
+      ],
+    );
+  }
+}
+
+class _PermissionCard extends StatelessWidget {
+  const _PermissionCard({
+    required this.title,
+    required this.isGranted,
+    required this.onTap,
+    this.subtitle,
+    this.isRequired = true,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool isGranted;
+  final bool isRequired;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final pendingColor = isRequired ? Colors.orange : Colors.blueGrey;
+    final color = isGranted ? Colors.green : pendingColor;
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: color.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: color),
       ),
       child: ListTile(
         leading: Icon(
-          isGranted ? Icons.check_circle : Icons.warning,
-          color: isGranted ? Colors.green : Colors.orange,
+          isGranted ? Icons.check_circle : (isRequired ? Icons.warning : Icons.info_outline),
+          color: color,
         ),
         title: Text(title),
+        subtitle: subtitle == null || isGranted ? null : Text(subtitle!),
         trailing: isGranted
             ? null
             : ElevatedButton(

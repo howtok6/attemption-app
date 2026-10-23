@@ -1,6 +1,7 @@
 package com.gabriel.attemption.attemption
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -39,6 +40,7 @@ class AppMonitorService : Service() {
 
     private var overlayView: TextView? = null
     private var overlayShownAt = 0L
+    private var lastNotificationText = ""
 
     private val monitorRunnable = object : Runnable {
         override fun run() {
@@ -57,6 +59,7 @@ class AppMonitorService : Service() {
         usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         store = UsageStore(this)
         state = store.load()
+        isRunning = true
         createNotificationChannel()
         startInForeground()
         handler.post(monitorRunnable)
@@ -70,6 +73,8 @@ class AppMonitorService : Service() {
         handler.removeCallbacks(monitorRunnable)
         hideOverlay()
         store.save(state)
+        isRunning = false
+        publishStatus(System.currentTimeMillis())
         super.onDestroy()
     }
 
@@ -96,6 +101,23 @@ class AppMonitorService : Service() {
             is Decision.Resting -> block(now, "Tiempo de descanso.\nFaltan ${minutesCeil(decision.restLeftMs)} min.")
             is Decision.DailyLimitReached -> block(now, "Has alcanzado tu límite diario de ${minutes(limits.dailyMaxMs)} min.")
         }
+
+        publishStatus(now)
+        updateNotification(now)
+    }
+
+    private fun publishStatus(now: Long) {
+        StatusBus.publish(
+            UsageStatus.toMap(state, limits, now, UsageStore.dayKey(now), isRunning, store.protectionEnabled)
+        )
+    }
+
+    /** Actualiza la notificación fija solo cuando cambia su texto (como máximo una vez por minuto). */
+    private fun updateNotification(now: Long) {
+        val text = UsageStatus.notificationText(state, limits, now, UsageStore.dayKey(now))
+        if (text == lastNotificationText) return
+        lastNotificationText = text
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, createNotification(text))
     }
 
     /**
@@ -192,7 +214,9 @@ class AppMonitorService : Service() {
     }
 
     private fun startInForeground() {
-        val notification = createNotification()
+        val now = System.currentTimeMillis()
+        lastNotificationText = UsageStatus.notificationText(state, limits, now, UsageStore.dayKey(now))
+        val notification = createNotification(lastNotificationText)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -207,13 +231,22 @@ class AppMonitorService : Service() {
         }
     }
 
-    private fun createNotification(): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun createNotification(text: String): Notification {
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Attemption está activo")
-            .setContentText("Monitoreando el uso de redes sociales.")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(openApp)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
+    }
 
     companion object {
         private const val TAG = "AttemptionMonitor"
@@ -227,8 +260,17 @@ class AppMonitorService : Service() {
 
         val TARGET_APPS = setOf("com.instagram.android", "com.zhiliaoapp.musically")
 
+        /** `true` mientras el servicio está creado en este proceso. */
+        @Volatile
+        var isRunning = false
+            private set
+
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, AppMonitorService::class.java))
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, AppMonitorService::class.java))
         }
 
         private fun minutes(ms: Long): Long = ms / 60_000L
