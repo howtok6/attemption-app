@@ -8,192 +8,230 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
-import android.view.LayoutInflater
-import android.view.View
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import java.util.Calendar
+import androidx.core.content.ContextCompat
 
 class AppMonitorService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var overlayView: View? = null
-    private val handler = Handler(Looper.getMainLooper())
-    
-    private val targetApps = listOf("com.instagram.android", "com.zhiliaoapp.musically")
-    
-    // Limits
-    private val MAX_DAILY_TIME_MS = 60 * 60 * 1000L // 1 hour
-    private val SESSION_MAX_TIME_MS = 5 * 60 * 1000L // 5 mins
-    private val REST_TIME_MS = 10 * 60 * 1000L // 10 mins
+    private lateinit var usageStatsManager: UsageStatsManager
+    private lateinit var store: UsageStore
 
-    private var sessionStartTime = 0L
-    private var blockEndTime = 0L
-    private var isOverlayShowing = false
+    private val limits = UsageLimits()
+    private val limiter = UsageLimiter(limits)
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var state = UsageState()
+    private var currentApp = ""
+    private var lastEventQueryAt = 0L
+    private var lastTickAt = 0L
+
+    private var overlayView: TextView? = null
+    private var overlayShownAt = 0L
+
+    private val monitorRunnable = object : Runnable {
+        override fun run() {
+            try {
+                checkUsage()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en el ciclo de monitoreo", e)
+            }
+            handler.postDelayed(this, TICK_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        store = UsageStore(this)
+        state = store.load()
         createNotificationChannel()
-        startForeground(1, createNotification())
-        
+        startInForeground()
         handler.post(monitorRunnable)
     }
 
-    private val monitorRunnable = object : Runnable {
-        override fun run() {
-            checkUsage()
-            handler.postDelayed(this, 2000) // Check every 2 seconds
-        }
-    }
-
-    private fun checkUsage() {
-        val foregroundApp = getForegroundApp()
-        val isTargetApp = targetApps.contains(foregroundApp)
-        val now = System.currentTimeMillis()
-
-        // 1. Check Daily Total
-        var dailyTotal = 0L
-        if (isTargetApp) {
-            dailyTotal = getDailyUsage(foregroundApp)
-        }
-
-        if (isTargetApp && dailyTotal >= MAX_DAILY_TIME_MS) {
-            // Block completely
-            showOverlay("Has alcanzado tu límite diario de 1 hora.")
-            return
-        }
-
-        // 2. Check Session
-        if (isTargetApp) {
-            if (now < blockEndTime) {
-                // Still in rest period!
-                showOverlay("Tiempo de descanso. Faltan ${(blockEndTime - now) / 1000 / 60 + 1} minutos.")
-                return
-            }
-
-            if (sessionStartTime == 0L) {
-                sessionStartTime = now
-            }
-            
-            val currentSessionTime = now - sessionStartTime
-            if (currentSessionTime >= SESSION_MAX_TIME_MS) {
-                // Start rest period
-                blockEndTime = now + REST_TIME_MS
-                sessionStartTime = 0L
-                showOverlay("Sesión de 5 min terminada. ¡Descansa 10 min!")
-            } else {
-                hideOverlay()
-            }
-        } else {
-            // Not in target app
-            if (now >= blockEndTime) {
-                // Rest period finished
-                sessionStartTime = 0L
-            }
-            hideOverlay()
-        }
-    }
-
-    private fun getForegroundApp(): String {
-        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val time = System.currentTimeMillis()
-        val events = usageStatsManager.queryEvents(time - 1000 * 60, time)
-        val event = UsageEvents.Event()
-        var currentApp = ""
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                currentApp = event.packageName
-            }
-        }
-        return currentApp
-    }
-
-    private fun getDailyUsage(packageName: String): Long {
-        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        val startTime = calendar.timeInMillis
-        val endTime = System.currentTimeMillis()
-
-        val stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime)
-        return stats[packageName]?.totalTimeInForeground ?: 0L
-    }
-
-    private fun showOverlay(message: String) {
-        if (isOverlayShowing) return
-        
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        )
-
-        val context = this
-        val textView = TextView(context).apply {
-            text = "Attemption\n\n$message"
-            setTextColor(Color.WHITE)
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#E6673AB7")) // Deep purple semi-transparent
-            setPadding(32, 32, 32, 32)
-        }
-        
-        overlayView = textView
-        windowManager.addView(overlayView, params)
-        isOverlayShowing = true
-    }
-
-    private fun hideOverlay() {
-        if (!isOverlayShowing || overlayView == null) return
-        windowManager.removeView(overlayView)
-        overlayView = null
-        isOverlayShowing = false
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "AttemptionServiceChannel",
-                "Attemption Monitor",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun createNotification(): Notification {
-        return NotificationCompat.Builder(this, "AttemptionServiceChannel")
-            .setContentTitle("Attemption está activo")
-            .setContentText("Monitoreando el uso de redes sociales.")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .build()
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        super.onDestroy()
         handler.removeCallbacks(monitorRunnable)
         hideOverlay()
+        store.save(state)
+        super.onDestroy()
+    }
+
+    private fun checkUsage() {
+        val now = System.currentTimeMillis()
+        // Acotar el salto evita sumar minutos de golpe si el teléfono estuvo dormido.
+        val delta = if (lastTickAt == 0L) 0L else (now - lastTickAt).coerceIn(0L, MAX_TICK_DELTA_MS)
+        lastTickAt = now
+
+        val inTarget = updateForegroundApp(now) in TARGET_APPS
+        val (newState, decision) = limiter.tick(state, now, delta, inTarget, UsageStore.dayKey(now))
+        if (newState != state) {
+            state = newState
+            store.save(newState)
+        }
+
+        when (decision) {
+            is Decision.Idle -> if (now - overlayShownAt >= OVERLAY_MIN_VISIBLE_MS) hideOverlay()
+            is Decision.Allow -> hideOverlay()
+            is Decision.SessionEnded -> block(
+                now,
+                "Sesión de ${minutes(limits.sessionMaxMs)} min terminada.\n¡Descansa ${minutes(limits.restMs)} min!",
+            )
+            is Decision.Resting -> block(now, "Tiempo de descanso.\nFaltan ${minutesCeil(decision.restLeftMs)} min.")
+            is Decision.DailyLimitReached -> block(now, "Has alcanzado tu límite diario de ${minutes(limits.dailyMaxMs)} min.")
+        }
+    }
+
+    /**
+     * Mantiene en memoria la app en primer plano y la actualiza solo con los eventos nuevos.
+     * Antes se miraban únicamente los últimos 60 s: si Instagram no cambiaba de pantalla interna
+     * (lo normal al hacer scroll) no había evento y el servicio creía que el usuario había salido.
+     */
+    private fun updateForegroundApp(now: Long): String {
+        val from = if (lastEventQueryAt == 0L) now - INITIAL_LOOKBACK_MS else lastEventQueryAt - EVENT_OVERLAP_MS
+        val events = usageStatsManager.queryEvents(from, now) ?: return currentApp
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> currentApp = event.packageName
+                UsageEvents.Event.ACTIVITY_PAUSED -> if (event.packageName == currentApp) currentApp = ""
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> currentApp = ""
+            }
+        }
+        lastEventQueryAt = now
+        return currentApp
+    }
+
+    /** Muestra (o actualiza) el aviso y manda al usuario a la pantalla de inicio. */
+    private fun block(now: Long, message: String) {
+        overlayShownAt = now
+        showOrUpdateOverlay(message)
+        goHome()
+    }
+
+    private fun goHome() {
+        val home = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(home)
+        } catch (e: Exception) {
+            // Si Android no permite abrir el inicio, la capa sigue bloqueando la app por encima.
+            Log.w(TAG, "No se pudo volver a la pantalla de inicio", e)
+        }
+    }
+
+    private fun showOrUpdateOverlay(message: String) {
+        val label = "Attemption\n\n$message\n\nToca para cerrar"
+        overlayView?.let {
+            it.text = label
+            return
+        }
+        if (!Permissions.canDrawOverlays(this)) {
+            Log.w(TAG, "Sin permiso para mostrar sobre otras apps")
+            return
+        }
+        val view = TextView(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#E6673AB7")) // morado semitransparente
+            setPadding(32, 32, 32, 32)
+            setOnClickListener { hideOverlay() }
+        }
+        try {
+            windowManager.addView(view, overlayParams())
+            overlayView = view
+        } catch (e: Exception) {
+            Log.e(TAG, "No se pudo mostrar la capa de bloqueo", e)
+        }
+    }
+
+    private fun hideOverlay() {
+        val view = overlayView ?: return
+        overlayView = null
+        try {
+            windowManager.removeView(view)
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo quitar la capa de bloqueo", e)
+        }
+    }
+
+    private fun overlayParams(): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        )
+    }
+
+    private fun startInForeground() {
+        val notification = createNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "Attemption Monitor", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Attemption está activo")
+            .setContentText("Monitoreando el uso de redes sociales.")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(true)
+            .build()
+
+    companion object {
+        private const val TAG = "AttemptionMonitor"
+        private const val CHANNEL_ID = "AttemptionServiceChannel"
+        private const val NOTIFICATION_ID = 1
+        private const val TICK_MS = 2_000L
+        private const val MAX_TICK_DELTA_MS = 5_000L
+        private const val INITIAL_LOOKBACK_MS = 60 * 60_000L
+        private const val EVENT_OVERLAP_MS = 2_000L
+        private const val OVERLAY_MIN_VISIBLE_MS = 5_000L
+
+        val TARGET_APPS = setOf("com.instagram.android", "com.zhiliaoapp.musically")
+
+        fun start(context: Context) {
+            ContextCompat.startForegroundService(context, Intent(context, AppMonitorService::class.java))
+        }
+
+        private fun minutes(ms: Long): Long = ms / 60_000L
+        private fun minutesCeil(ms: Long): Long = (ms + 59_999L) / 60_000L
     }
 }

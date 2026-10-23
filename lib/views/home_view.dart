@@ -41,10 +41,10 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
         foregroundColor: Colors.white,
       ),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.shield, size: 80, color: Colors.deepPurple),
               const SizedBox(height: 24),
@@ -99,7 +99,7 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
   Widget _buildPermissionCard(BuildContext context, {required String title, required bool isGranted, required VoidCallback onTap}) {
     return Card(
       elevation: 0,
-      color: isGranted ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+      color: isGranted ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: isGranted ? Colors.green : Colors.orange),

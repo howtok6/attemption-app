@@ -1,30 +1,45 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
+import 'package:attemption/main.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:attemption/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('com.gabriel.attemption/permissions');
+  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  void mockPermissions({required bool usage, required bool overlay}) {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'checkUsagePermission':
+          return usage;
+        case 'checkOverlayPermission':
+          return overlay;
+        default:
+          return true;
+      }
+    });
+  }
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('sin permisos muestra dos botones Permitir y no el de iniciar', (tester) async {
+    mockPermissions(usage: false, overlay: false);
+    await tester.pumpWidget(const AttemptionApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Protege tu tiempo'), findsOneWidget);
+    expect(find.text('Permitir'), findsNWidgets(2));
+    expect(find.text('Iniciar Protección'), findsNothing);
+  });
+
+  testWidgets('con ambos permisos se puede iniciar la protección', (tester) async {
+    mockPermissions(usage: true, overlay: true);
+    await tester.pumpWidget(const AttemptionApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Permitir'), findsNothing);
+    await tester.tap(find.text('Iniciar Protección'));
+    await tester.pumpAndSettle();
+    expect(find.text('Servicio Activo'), findsOneWidget);
   });
 }

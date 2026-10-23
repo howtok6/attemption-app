@@ -37,8 +37,7 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> startService() async {
     if (isReady) {
-      await _monitorService.startService();
-      _isServiceRunning = true;
+      _isServiceRunning = await _monitorService.startService();
       notifyListeners();
     }
   }
