@@ -83,6 +83,7 @@ void main() {
     expect(find.text('Permitir'), findsNWidgets(2));
     expect(find.text('Iniciar Protección'), findsNothing);
     expect(find.text('Guía para teléfonos Xiaomi'), findsOneWidget);
+    expect(find.text('Inicio de aplicaciones'), findsOneWidget);
   });
 
   testWidgets('con ambos permisos se puede iniciar la protección', (tester) async {
@@ -135,14 +136,18 @@ void main() {
 
     await tapText(tester, 'Desactivar protección');
     expect(find.byType(AlertDialog), findsOneWidget);
-    final waiting = tester.widget<FilledButton>(find.byType(FilledButton));
+    final waiting = tester.widget<FilledButton>(
+      find.descendant(of: find.byType(AlertDialog), matching: find.byType(FilledButton)),
+    );
     expect(waiting.onPressed, isNull);
 
     await tester.pump(const Duration(seconds: 30));
-    final ready = tester.widget<FilledButton>(find.byType(FilledButton));
+    final ready = tester.widget<FilledButton>(
+      find.descendant(of: find.byType(AlertDialog), matching: find.byType(FilledButton)),
+    );
     expect(ready.onPressed, isNotNull);
 
-    await tester.tap(find.byType(FilledButton));
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.byType(FilledButton)));
     await tester.pumpAndSettle();
     expect(calls, contains('stopMonitorService'));
     expect(find.text('Iniciar Protección'), findsOneWidget);

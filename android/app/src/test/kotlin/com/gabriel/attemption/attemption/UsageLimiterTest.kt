@@ -11,34 +11,28 @@ class UsageLimiterTest {
     private val day = "2026-296"
     private val minute = 60_000L
 
-    /** Simula ticks de 2 s durante [durationMs] y devuelve el estado, la hora final y la última decisión. */
-    private data class Run(val state: UsageState, val now: Long, val last: Decision, val decisions: List<Decision>)
+    private data class Run(val state: UsageState, val now: Long, val decisions: List<Decision>)
 
-    private fun run(
-        state: UsageState,
-        start: Long,
-        durationMs: Long,
-        inTarget: Boolean,
-        dayKey: String = day,
-    ): Run {
+    /** Simula revisiones cada 2 s durante [durationMs], dentro o fuera de una app limitada. */
+    private fun run(state: UsageState, start: Long, durationMs: Long, inTarget: Boolean, dayKey: String = day): Run {
         var s = state
         var now = start
         val decisions = mutableListOf<Decision>()
-        var last: Decision = Decision.Idle
         while (now < start + durationMs) {
             now += tickMs
-            val (next, decision) = limiter.tick(s, now, tickMs, inTarget, dayKey)
+            val used = if (inTarget) tickMs else 0L
+            val lastTarget = if (inTarget) now else s.lastSeenInTargetAt
+            val (next, decision) = limiter.tick(s, now, used, inTarget, lastTarget, dayKey)
             s = next
-            last = decision
             decisions += decision
         }
-        return Run(s, now, last, decisions)
+        return Run(s, now, decisions)
     }
 
     @Test
     fun `la sesion termina tras 5 minutos de uso continuo`() {
         val r = run(UsageState(), 0L, 5 * minute, inTarget = true)
-        assertEquals(Decision.SessionEnded, r.last)
+        assertEquals(Decision.SessionEnded, r.decisions.last())
         assertEquals(1, r.decisions.count { it == Decision.SessionEnded })
     }
 
@@ -74,7 +68,6 @@ class UsageLimiterTest {
     fun `el limite diario es combinado y se alcanza a la hora`() {
         var s = UsageState()
         var now = 0L
-        var reached = false
         // 12 ciclos de 5 min de uso + 10 min de descanso = 60 min de uso
         repeat(12) {
             val use = run(s, now, 5 * minute, inTarget = true)
@@ -83,18 +76,36 @@ class UsageLimiterTest {
             now = rest.now
         }
         val after = run(s, now, 1 * minute, inTarget = true)
-        reached = after.decisions.all { it == Decision.DailyLimitReached }
-        assertTrue(reached)
+        assertTrue(after.decisions.all { it == Decision.DailyLimitReached })
         assertTrue(s.dailyUsedMs >= 60 * minute)
     }
 
     @Test
     fun `un dia nuevo reinicia el uso diario`() {
         val full = UsageState(dayKey = day, dailyUsedMs = 60 * minute)
-        val sameDay = limiter.tick(full, 1_000L, tickMs, true, day)
+        val sameDay = limiter.tick(full, 1_000L, tickMs, true, 1_000L, day)
         assertEquals(Decision.DailyLimitReached, sameDay.second)
-        val nextDay = limiter.tick(full, 1_000L, tickMs, true, "2026-297")
+        val nextDay = limiter.tick(full, 1_000L, tickMs, true, 1_000L, "2026-297")
         assertTrue(nextDay.second is Decision.Allow)
         assertEquals(tickMs, nextDay.first.dailyUsedMs)
+    }
+
+    @Test
+    fun `el uso recuperado tras un cierre se cuenta aunque ya no este en la app`() {
+        // El sistema cerró el servicio; al volver, los eventos muestran 6 min de Instagram.
+        val (state, decision) = limiter.tick(UsageState(dayKey = day), 10 * minute, 6 * minute, false, 9 * minute, day)
+        assertEquals(Decision.Idle, decision)
+        assertEquals(6 * minute, state.dailyUsedMs)
+        assertEquals(10 * minute + 10 * minute, state.restEndsAt) // empieza el descanso
+        // Si vuelve a abrir Instagram, queda en descanso.
+        val (_, next) = limiter.tick(state, 11 * minute, 0L, true, 11 * minute, day)
+        assertTrue(next is Decision.Resting)
+    }
+
+    @Test
+    fun `una sola revision larga dentro de la app corta la sesion igual`() {
+        // Revisiones espaciadas: una sola trae 5 min de uso.
+        val (_, decision) = limiter.tick(UsageState(dayKey = day), 5 * minute, 5 * minute, true, 5 * minute, day)
+        assertEquals(Decision.SessionEnded, decision)
     }
 }

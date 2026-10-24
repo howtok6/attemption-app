@@ -3,7 +3,14 @@ package com.gabriel.attemption.attemption
 import android.content.Context
 import java.util.Calendar
 
-/** Persistencia del estado de uso y de si el usuario activó la protección. */
+/** Hasta dónde se procesaron los eventos de uso y qué app quedaba en primer plano. */
+data class TrackerState(val processedUntil: Long = 0L, val currentApp: String = "")
+
+/**
+ * Persistencia del estado de uso y de si el usuario activó la protección.
+ * Solo la usa el proceso ":monitor" (servicio, BootReceiver y MonitorProvider);
+ * la pantalla consulta a través de [MonitorProvider], así no hay dos procesos escribiendo.
+ */
 class UsageStore(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -32,7 +39,32 @@ class UsageStore(context: Context) {
             .apply()
     }
 
+    fun loadTracker(): TrackerState = TrackerState(
+        processedUntil = prefs.getLong(KEY_PROCESSED_UNTIL, 0L),
+        currentApp = prefs.getString(KEY_TRACKED_APP, "") ?: "",
+    )
+
+    /** Guarda el estado de uso y el del seguimiento juntos, para que sean coherentes al reiniciar. */
+    fun save(state: UsageState, tracker: TrackerState) {
+        prefs.edit()
+            .putString(KEY_DAY, state.dayKey)
+            .putLong(KEY_DAILY_USED, state.dailyUsedMs)
+            .putLong(KEY_SESSION_USED, state.sessionUsedMs)
+            .putLong(KEY_REST_ENDS_AT, state.restEndsAt)
+            .putLong(KEY_LAST_SEEN, state.lastSeenInTargetAt)
+            .putLong(KEY_PROCESSED_UNTIL, tracker.processedUntil)
+            .putString(KEY_TRACKED_APP, tracker.currentApp)
+            .apply()
+    }
+
+    /** Al desactivar la protección: la próxima vez no se recupera el uso del tiempo desactivado. */
+    fun clearTracker() {
+        prefs.edit().remove(KEY_PROCESSED_UNTIL).remove(KEY_TRACKED_APP).apply()
+    }
+
     companion object {
+        private const val KEY_PROCESSED_UNTIL = "events_processed_until"
+        private const val KEY_TRACKED_APP = "tracked_app"
         private const val PREFS_NAME = "attemption_usage"
         private const val KEY_ENABLED = "protection_enabled"
         private const val KEY_DAY = "day"

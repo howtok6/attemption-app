@@ -19,6 +19,7 @@ class HomeViewModel extends ChangeNotifier {
   bool _hasNotificationPermission = false;
   bool _isIgnoringBatteryOptimizations = false;
   String _manufacturer = '';
+  bool _hasAppLaunchSettings = false;
   AppUsageModel _usage = AppUsageModel.empty;
 
   bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -27,6 +28,7 @@ class HomeViewModel extends ChangeNotifier {
   bool get hasNotificationPermission => _hasNotificationPermission;
   bool get isIgnoringBatteryOptimizations => _isIgnoringBatteryOptimizations;
   bool get isReady => _hasUsagePermission && _hasOverlayPermission;
+  bool get hasAppLaunchSettings => _hasAppLaunchSettings;
   bool get isServiceRunning => _usage.running;
   AppUsageModel get usage => _usage;
 
@@ -40,6 +42,7 @@ class HomeViewModel extends ChangeNotifier {
       _notify();
     }, onError: (Object e) => debugPrint('Attemption: error en el estado del servicio: $e'));
     _manufacturer = await _monitorService.getManufacturer();
+    _hasAppLaunchSettings = await _monitorService.hasAppLaunchSettings();
     await refresh();
   }
 
@@ -70,6 +73,7 @@ class HomeViewModel extends ChangeNotifier {
   Future<void> requestNotificationPermission() => _monitorService.requestNotificationPermission();
   Future<void> requestBatteryExemption() => _monitorService.requestBatteryExemption();
   Future<void> openBatteryGuide() => _monitorService.openBatteryGuide();
+  Future<void> openAppLaunchSettings() => _monitorService.openAppLaunchSettings();
 
   Future<void> startService() async {
     if (!isReady) return;

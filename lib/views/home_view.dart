@@ -114,6 +114,18 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
           ),
           onPressed: viewModel.openBatteryGuide,
         ),
+        if (viewModel.hasAppLaunchSettings) ...[
+          const SizedBox(height: 12),
+          _ActionCard(
+            title: 'Inicio de aplicaciones',
+            subtitle:
+                'En tu ${viewModel.manufacturer.isEmpty ? 'teléfono' : viewModel.manufacturer}, '
+                'busca Attemption, cambia a "Gestionar manualmente" y activa las tres opciones. '
+                'Así el sistema no la cierra para liberar memoria.',
+            buttonLabel: 'Abrir ajustes',
+            onTap: viewModel.openAppLaunchSettings,
+          ),
+        ],
         const SizedBox(height: 24),
         if (viewModel.isServiceRunning)
           OutlinedButton.icon(
@@ -324,6 +336,52 @@ class _PermissionCard extends StatelessWidget {
                     const SizedBox(height: 12),
                     FilledButton.tonal(onPressed: onTap, child: const Text('Permitir')),
                   ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tarjeta con una recomendación que no se puede verificar desde la app (ajustes del fabricante).
+class _ActionCard extends StatelessWidget {
+  const _ActionCard({required this.title, required this.subtitle, required this.buttonLabel, required this.onTap});
+
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: AppColors.tint(AppColors.neutral),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: AppColors.neutral.withValues(alpha: 0.7)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.rocket_launch_outlined, color: AppColors.neutral),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary)),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(onPressed: onTap, child: Text(buttonLabel)),
                 ],
               ),
             ),

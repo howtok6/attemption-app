@@ -38,6 +38,7 @@
         
         <service
             android:name=".AppMonitorService"
+            android:process=":monitor"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse">
@@ -46,6 +47,7 @@
 
         <receiver
             android:name=".BootReceiver"
+            android:process=":monitor"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -55,6 +57,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
+
+        <!-- El monitor corre en su propio proceso, sin Flutter, para ocupar poca memoria.
+             La pantalla se comunica con él a través de este provider (no exportado). -->
+        <provider
+            android:name=".MonitorProvider"
+            android:authorities="${applicationId}.monitor"
+            android:process=":monitor"
+            android:exported="false" />
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -68,6 +78,9 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Pantalla "Inicio de aplicaciones" de Honor / Huawei -->
+        <package android:name="com.hihonor.systemmanager" />
+        <package android:name="com.huawei.systemmanager" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

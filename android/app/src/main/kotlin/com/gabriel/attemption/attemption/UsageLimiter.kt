@@ -35,52 +35,57 @@ sealed class Decision {
 
 /**
  * Lógica pura de límites (sin dependencias de Android) para poder probarla con tests unitarios.
- * El tiempo se cuenta con un contador propio y combinado entre todas las apps limitadas;
+ * El uso llega ya medido por [ForegroundTracker] (combinado entre todas las apps limitadas);
  * el tiempo bloqueado nunca se suma al uso diario.
  */
 class UsageLimiter(private val limits: UsageLimits = UsageLimits()) {
 
     /**
-     * Avanza el estado un tick.
-     * @param deltaMs tiempo transcurrido desde el tick anterior (el llamador lo acota).
+     * Avanza el estado con el uso medido desde la revisión anterior.
+     * @param usedMs ms que una app limitada estuvo en primer plano desde la revisión anterior
+     *   (puede incluir tiempo recuperado si el servicio estuvo cerrado).
+     * @param inTargetNow si en este momento hay una app limitada en primer plano.
+     * @param lastTargetAt último instante en que una app limitada estuvo en primer plano.
      * @param todayKey identificador del día actual; si cambia, el uso diario vuelve a cero.
      */
     fun tick(
         state: UsageState,
         now: Long,
-        deltaMs: Long,
-        inTargetApp: Boolean,
+        usedMs: Long,
+        inTargetNow: Boolean,
+        lastTargetAt: Long,
         todayKey: String,
     ): Pair<UsageState, Decision> {
         var s = if (state.dayKey != todayKey) state.copy(dayKey = todayKey, dailyUsedMs = 0L) else state
+        if (lastTargetAt > s.lastSeenInTargetAt) s = s.copy(lastSeenInTargetAt = lastTargetAt)
 
-        if (!inTargetApp) {
+        // Durante un descanso o con el límite diario cumplido el uso no se suma.
+        val blockedBefore = s.dailyUsedMs >= limits.dailyMaxMs || now < s.restEndsAt
+        var sessionEnded = false
+        if (usedMs > 0 && !blockedBefore) {
+            val session = s.sessionUsedMs + usedMs
+            s = s.copy(dailyUsedMs = s.dailyUsedMs + usedMs, sessionUsedMs = session)
+            if (session >= limits.sessionMaxMs) {
+                s = s.copy(sessionUsedMs = 0L, restEndsAt = now + limits.restMs)
+                sessionEnded = true
+            }
+        }
+
+        if (!inTargetNow) {
             // La sesión solo se reinicia si el usuario estuvo fuera al menos el tiempo de descanso.
-            // Salir y volver enseguida ya no regala otros 5 minutos.
+            // Salir y volver enseguida no regala otros 5 minutos.
             if (s.sessionUsedMs > 0 && now - s.lastSeenInTargetAt >= limits.restMs) {
                 s = s.copy(sessionUsedMs = 0L)
             }
             return s to Decision.Idle
         }
 
-        s = s.copy(lastSeenInTargetAt = now)
-
-        if (s.dailyUsedMs >= limits.dailyMaxMs) return s to Decision.DailyLimitReached
-        if (now < s.restEndsAt) return s to Decision.Resting(s.restEndsAt - now)
-
-        val daily = s.dailyUsedMs + deltaMs
-        val session = s.sessionUsedMs + deltaMs
-        if (daily >= limits.dailyMaxMs) {
-            return s.copy(dailyUsedMs = daily, sessionUsedMs = session) to Decision.DailyLimitReached
+        val decision = when {
+            s.dailyUsedMs >= limits.dailyMaxMs -> Decision.DailyLimitReached
+            sessionEnded -> Decision.SessionEnded
+            now < s.restEndsAt -> Decision.Resting(s.restEndsAt - now)
+            else -> Decision.Allow(limits.sessionMaxMs - s.sessionUsedMs, limits.dailyMaxMs - s.dailyUsedMs)
         }
-        if (session >= limits.sessionMaxMs) {
-            return s.copy(
-                dailyUsedMs = daily,
-                sessionUsedMs = 0L,
-                restEndsAt = now + limits.restMs,
-            ) to Decision.SessionEnded
-        }
-        return s.copy(dailyUsedMs = daily, sessionUsedMs = session) to
-            Decision.Allow(limits.sessionMaxMs - session, limits.dailyMaxMs - daily)
+        return s to decision
     }
 }

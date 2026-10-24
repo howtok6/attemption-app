@@ -2,9 +2,14 @@ package com.gabriel.attemption.attemption
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
@@ -16,9 +21,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
-    private val store by lazy { UsageStore(this) }
-    private val limits = UsageLimits()
-    private var statusListener: ((Map<String, Any>) -> Unit)? = null
+    private var statusObserver: ContentObserver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -56,26 +59,24 @@ class MainActivity : FlutterActivity() {
                     openUrl(batteryGuideUrl())
                     result.success(true)
                 }
+                "hasAppLaunchSettings" -> result.success(appLaunchSettingsIntent() != null)
+                "openAppLaunchSettings" -> {
+                    appLaunchSettingsIntent()?.let { openSafely(it) }
+                    result.success(true)
+                }
                 "getStatus" -> result.success(currentStatus())
                 "startMonitorService" -> {
-                    if (!Permissions.allGranted(this)) {
-                        result.error("MISSING_PERMISSIONS", "Faltan permisos para iniciar la protección", null)
-                    } else {
-                        store.protectionEnabled = true
-                        AppMonitorService.start(this)
+                    if (callMonitor(MonitorProvider.METHOD_START) == MonitorController.StartResult.STARTED.name) {
                         result.success(true)
+                    } else {
+                        result.error("MISSING_PERMISSIONS", "Faltan permisos para iniciar la protección", null)
                     }
                 }
                 "stopMonitorService" -> {
-                    val now = System.currentTimeMillis()
-                    val locked = AppMonitorService.isRunning &&
-                        UsageStatus.isLocked(store.load(), limits, now, UsageStore.dayKey(now))
-                    if (locked) {
-                        result.error("LOCKED", "No se puede desactivar durante un descanso o con el límite diario cumplido", null)
-                    } else {
-                        store.protectionEnabled = false
-                        AppMonitorService.stop(this)
+                    if (callMonitor(MonitorProvider.METHOD_STOP) == MonitorController.StopResult.STOPPED.name) {
                         result.success(true)
+                    } else {
+                        result.error("LOCKED", "No se puede desactivar durante un descanso o con el límite diario cumplido", null)
                     }
                 }
                 else -> result.notImplemented()
@@ -84,38 +85,69 @@ class MainActivity : FlutterActivity() {
 
         EventChannel(messenger, STATUS_CHANNEL).setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
-                removeStatusListener()
-                val listener: (Map<String, Any>) -> Unit = { events.success(it) }
-                statusListener = listener
-                StatusBus.addListener(listener)
+                removeStatusObserver()
+                // El servicio avisa cada vez que su estado cambia (notifyChange en la URI de estado).
+                val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                    override fun onChange(selfChange: Boolean) {
+                        events.success(currentStatus())
+                    }
+                }
+                statusObserver = observer
+                contentResolver.registerContentObserver(MonitorProvider.statusUri(packageName), false, observer)
                 events.success(currentStatus())
             }
 
-            override fun onCancel(arguments: Any?) = removeStatusListener()
+            override fun onCancel(arguments: Any?) = removeStatusObserver()
         })
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        removeStatusListener()
+        removeStatusObserver()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
-    private fun removeStatusListener() {
-        statusListener?.let { StatusBus.removeListener(it) }
-        statusListener = null
+    private fun removeStatusObserver() {
+        statusObserver?.let { contentResolver.unregisterContentObserver(it) }
+        statusObserver = null
     }
 
-    /** Estado actual: si el servicio no corre, se calcula desde lo guardado en disco. */
-    private fun currentStatus(): Map<String, Any> {
-        val now = System.currentTimeMillis()
-        return UsageStatus.toMap(
-            store.load(),
-            limits,
-            now,
-            UsageStore.dayKey(now),
-            AppMonitorService.isRunning,
-            store.protectionEnabled,
+    /** Llama al proceso ":monitor" (MonitorProvider) y devuelve su respuesta. */
+    private fun callMonitorBundle(method: String): Bundle? = try {
+        contentResolver.call(MonitorProvider.statusUri(packageName), method, null, null)
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun callMonitor(method: String): String? = callMonitorBundle(method)?.getString(MonitorProvider.KEY_RESULT)
+
+    /** Estado actual del monitor, convertido a un mapa para Flutter. */
+    private fun currentStatus(): Map<String, Any?> {
+        val bundle = callMonitorBundle(MonitorProvider.METHOD_STATUS) ?: return emptyMap()
+        @Suppress("DEPRECATION")
+        return bundle.keySet().associateWith { bundle.get(it) }
+    }
+
+    /**
+     * Pantalla del fabricante donde se permite que la app arranque sola y siga en segundo plano
+     * (Honor y Huawei la llaman "Inicio de aplicaciones"). `null` si el teléfono no la tiene.
+     */
+    private fun appLaunchSettingsIntent(): Intent? {
+        val candidates = listOf(
+            ComponentName("com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+            ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
         )
+        return candidates
+            .map { Intent().setComponent(it).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            .firstOrNull { it.resolveActivity(packageManager) != null }
+    }
+
+    private fun openSafely(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            // La pantalla existe pero el fabricante no permite abrirla desde otra app.
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     private fun requestNotificationPermission() {

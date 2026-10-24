@@ -34,6 +34,10 @@ class AppMonitorService {
   Future<String> getManufacturer() async => await _invoke<String>('getManufacturer') ?? '';
   Future<void> openBatteryGuide() => _invokeBool('openBatteryGuide');
 
+  /// Pantalla "Inicio de aplicaciones" de Honor/Huawei, si el teléfono la tiene.
+  Future<bool> hasAppLaunchSettings() => _invokeBool('hasAppLaunchSettings');
+  Future<void> openAppLaunchSettings() => _invokeBool('openAppLaunchSettings');
+
   /// Devuelve `true` si el servicio nativo se inició.
   Future<bool> startService() => _invokeBool('startMonitorService');
 
