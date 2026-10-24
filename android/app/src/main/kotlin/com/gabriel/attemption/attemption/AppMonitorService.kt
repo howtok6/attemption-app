@@ -172,10 +172,10 @@ class AppMonitorService : Service() {
         }
         val view = TextView(this).apply {
             text = label
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#ECE6F2"))
             textSize = 24f
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#E6673AB7")) // morado semitransparente
+            setBackgroundColor(Color.parseColor("#F2241538")) // morado muy oscuro, casi opaco
             setPadding(32, 32, 32, 32)
             setOnClickListener { hideOverlay() }
         }

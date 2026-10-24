@@ -31,18 +31,14 @@ class HomeViewModel extends ChangeNotifier {
   AppUsageModel get usage => _usage;
 
   /// Marca del teléfono con la primera letra en mayúscula ("Xiaomi"), o vacío si no se conoce.
-  String get manufacturer =>
-      _manufacturer.isEmpty ? '' : _manufacturer[0].toUpperCase() + _manufacturer.substring(1);
+  String get manufacturer => _manufacturer.isEmpty ? '' : _manufacturer[0].toUpperCase() + _manufacturer.substring(1);
 
   Future<void> _init() async {
     if (!isAndroid) return;
-    _statusSubscription = _monitorService.statusStream().listen(
-      (status) {
-        _usage = status;
-        _notify();
-      },
-      onError: (Object e) => debugPrint('Attemption: error en el estado del servicio: $e'),
-    );
+    _statusSubscription = _monitorService.statusStream().listen((status) {
+      _usage = status;
+      _notify();
+    }, onError: (Object e) => debugPrint('Attemption: error en el estado del servicio: $e'));
     _manufacturer = await _monitorService.getManufacturer();
     await refresh();
   }

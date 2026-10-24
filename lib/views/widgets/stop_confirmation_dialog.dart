@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
+
 /// Pide confirmación para desactivar la protección con una espera obligatoria.
 /// La espera agrega fricción: a menudo las ganas de abrir la app pasan en esos segundos.
 class StopConfirmationDialog extends StatefulWidget {
@@ -43,12 +45,9 @@ class _StopConfirmationDialogState extends State<StopConfirmationDialog> {
             : 'Tómate un momento: ¿de verdad lo necesitas ahora?\n\nYa puedes confirmar.',
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Mantener protección'),
-        ),
+        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Mantener protección')),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
           onPressed: waiting ? null : () => Navigator.of(context).pop(true),
           child: Text(waiting ? 'Desactivar ($_secondsLeft)' : 'Desactivar'),
         ),

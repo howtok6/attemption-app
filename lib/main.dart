@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'theme/app_theme.dart';
 import 'views/home_view.dart';
 import 'viewmodels/home_viewmodel.dart';
 
@@ -13,17 +14,8 @@ class AttemptionApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => HomeViewModel()),
-      ],
-      child: MaterialApp(
-        title: 'Attemption',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-          useMaterial3: true,
-        ),
-        home: const HomeView(),
-      ),
+      providers: [ChangeNotifierProvider(create: (_) => HomeViewModel())],
+      child: MaterialApp(title: 'Attemption', theme: buildAppTheme(), home: const HomeView()),
     );
   }
 }

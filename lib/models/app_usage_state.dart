@@ -53,10 +53,7 @@ class AppUsageModel {
     return AppUsageModel(
       running: map['running'] == true,
       protectionEnabled: map['protectionEnabled'] == true,
-      state: UsageState.values.firstWhere(
-        (s) => s.name == map['state'],
-        orElse: () => UsageState.inactive,
-      ),
+      state: UsageState.values.firstWhere((s) => s.name == map['state'], orElse: () => UsageState.inactive),
       dailyUsed: ms('dailyUsedMs', Duration.zero),
       dailyLimit: ms('dailyLimitMs', empty.dailyLimit),
       sessionUsed: ms('sessionUsedMs', Duration.zero),
@@ -67,14 +64,14 @@ class AppUsageModel {
   }
 
   AppUsageModel copyWith({bool? running, bool? protectionEnabled, UsageState? state}) => AppUsageModel(
-        running: running ?? this.running,
-        protectionEnabled: protectionEnabled ?? this.protectionEnabled,
-        state: state ?? this.state,
-        dailyUsed: dailyUsed,
-        dailyLimit: dailyLimit,
-        sessionUsed: sessionUsed,
-        sessionLimit: sessionLimit,
-        restRemaining: restRemaining,
-        restLimit: restLimit,
-      );
+    running: running ?? this.running,
+    protectionEnabled: protectionEnabled ?? this.protectionEnabled,
+    state: state ?? this.state,
+    dailyUsed: dailyUsed,
+    dailyLimit: dailyLimit,
+    sessionUsed: sessionUsed,
+    sessionLimit: sessionLimit,
+    restRemaining: restRemaining,
+    restLimit: restLimit,
+  );
 }

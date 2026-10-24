@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mismo fondo que AppColors.background en Flutter, para que no haya destello blanco al abrir -->
+    <color name="app_background">#FF121017</color>
+</resources>

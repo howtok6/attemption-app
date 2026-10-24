@@ -11,9 +11,8 @@ class AppMonitorService {
   static const statusChannel = EventChannel('com.gabriel.attemption/status');
 
   /// Estado en vivo del servicio: se emite al suscribirse y en cada revisión (cada 2 s).
-  Stream<AppUsageModel> statusStream() => statusChannel
-      .receiveBroadcastStream()
-      .map((event) => AppUsageModel.fromMap(event as Map<Object?, Object?>));
+  Stream<AppUsageModel> statusStream() =>
+      statusChannel.receiveBroadcastStream().map((event) => AppUsageModel.fromMap(event as Map<Object?, Object?>));
 
   Future<AppUsageModel?> getStatus() async {
     final map = await _invoke<Map<Object?, Object?>>('getStatus');

@@ -12,18 +12,17 @@ Map<String, Object> _status({
   int dailyUsedMs = 0,
   int sessionUsedMs = 0,
   int restLeftMs = 0,
-}) =>
-    {
-      'running': running,
-      'protectionEnabled': enabled,
-      'state': state,
-      'dailyUsedMs': dailyUsedMs,
-      'dailyLimitMs': 60 * _minute,
-      'sessionUsedMs': sessionUsedMs,
-      'sessionLimitMs': 5 * _minute,
-      'restLeftMs': restLeftMs,
-      'restLimitMs': 10 * _minute,
-    };
+}) => {
+  'running': running,
+  'protectionEnabled': enabled,
+  'state': state,
+  'dailyUsedMs': dailyUsedMs,
+  'dailyLimitMs': 60 * _minute,
+  'sessionUsedMs': sessionUsedMs,
+  'sessionLimitMs': 5 * _minute,
+  'restLeftMs': restLeftMs,
+  'restLimitMs': 10 * _minute,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -101,7 +100,13 @@ void main() {
     mockNative(
       usage: true,
       overlay: true,
-      status: _status(running: true, enabled: true, state: 'allowed', dailyUsedMs: 23 * _minute, sessionUsedMs: 3 * _minute),
+      status: _status(
+        running: true,
+        enabled: true,
+        state: 'allowed',
+        dailyUsedMs: 23 * _minute,
+        sessionUsedMs: 3 * _minute,
+      ),
     );
     await pumpApp(tester);
 
