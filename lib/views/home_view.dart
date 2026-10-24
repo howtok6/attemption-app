@@ -44,12 +44,16 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: viewModel.isAndroid ? _buildContent(context, viewModel) : _buildUnsupported(context),
+      // SafeArea: en Android 15+ la app ocupa toda la pantalla y el último botón
+      // quedaba debajo de la barra de gestos.
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: viewModel.isAndroid ? _buildContent(context, viewModel) : _buildUnsupported(context),
+            ),
           ),
         ),
       ),
@@ -72,16 +76,9 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
       children: [
         const Icon(Icons.shield, size: 80, color: Colors.deepPurple),
         const SizedBox(height: 16),
-        Text(
-          'Protege tu tiempo',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
+        Text('Protege tu tiempo', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 24),
-        if (viewModel.isServiceRunning) ...[
-          _StatusCard(usage: usage),
-          const SizedBox(height: 24),
-        ],
+        if (viewModel.isServiceRunning) ...[_StatusCard(usage: usage), const SizedBox(height: 24)],
         const _SectionTitle('Permisos necesarios'),
         _PermissionCard(
           title: 'Acceso a Uso de Aplicaciones',
@@ -200,7 +197,11 @@ class _StatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (title, color, icon) = switch (usage.state) {
-      UsageState.resting => ('Descanso: faltan ${_minutesCeil(usage.restRemaining)} min', Colors.orange, Icons.self_improvement),
+      UsageState.resting => (
+        'Descanso: faltan ${_minutesCeil(usage.restRemaining)} min',
+        Colors.orange,
+        Icons.self_improvement,
+      ),
       UsageState.blocked => ('Límite diario alcanzado', Colors.red, Icons.block),
       _ => ('Protección activa', Colors.green, Icons.check_circle),
     };
@@ -222,7 +223,10 @@ class _StatusCard extends StatelessWidget {
                 Icon(icon, color: color),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
@@ -299,18 +303,10 @@ class _PermissionCard extends StatelessWidget {
         side: BorderSide(color: color),
       ),
       child: ListTile(
-        leading: Icon(
-          isGranted ? Icons.check_circle : (isRequired ? Icons.warning : Icons.info_outline),
-          color: color,
-        ),
+        leading: Icon(isGranted ? Icons.check_circle : (isRequired ? Icons.warning : Icons.info_outline), color: color),
         title: Text(title),
         subtitle: subtitle == null || isGranted ? null : Text(subtitle!),
-        trailing: isGranted
-            ? null
-            : ElevatedButton(
-                onPressed: onTap,
-                child: const Text('Permitir'),
-              ),
+        trailing: isGranted ? null : ElevatedButton(onPressed: onTap, child: const Text('Permitir')),
       ),
     );
   }
